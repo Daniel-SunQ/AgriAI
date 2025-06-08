@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- 总体统计卡片 -->
+        <div class="col-md-12 mb-4">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">总体统计</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="stat-card text-center">
+                                <h3 class="text-primary" id="totalZones">12</h3>
+                                <p class="text-muted">总分区数</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card text-center">
+                                <h3 class="text-success" id="normalZones">0</h3>
+                                <p class="text-muted">正常分区</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card text-center">
+                                <h3 class="text-danger" id="abnormalZones">0</h3>
+                                <p class="text-muted">异常分区</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card text-center">
+                                <h3 class="text-warning" id="totalDetections">0</h3>
+                                <p class="text-muted">总检测次数</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分区状态表格 -->
+        <div class="col-md-6">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">分区状态</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>分区编号</th>
+                                    <th>状态</th>
+                                    <th>检测次数</th>
+                                    <th>异常植株数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="zoneStatusTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 病害统计 -->
+        <div class="col-md-6">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">病害统计</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>病害类别</th>
+                                    <th>出现次数</th>
+                                    <th>占比</th>
+                                </tr>
+                            </thead>
+                            <tbody id="diseaseStatsTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let allDetections = {};
+let plantStatusChart = null;
+let diseaseDistributionChart = null;
+
+// 加载所有检测结果
+function loadDetections() {
+    fetch('/get_detections')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('获取检测结果失败:', data.error);
+                return;
+            }
+            updateStatistics(data);
+        })
+        .catch(error => {
+            console.error('获取检测结果失败:', error);
+        });
+}
+
+// 更新统计信息
+function updateStatistics(data) {
+    // 初始化统计数据
+    const stats = {
+        totalZones: 12,  // 固定12个分区
+        totalPlants: 20, // 固定20个植株
+        normalZones: 0,
+        abnormalZones: 0,
+        totalDetections: 0,
+        zoneStats: {},
+        diseaseStats: {}
+    };
+
+    // 初始化所有分区的统计
+    for (let i = 1; i <= stats.totalZones; i++) {
+        stats.zoneStats[i] = {
+            totalDetections: 0,
+            abnormalPlants: new Set(),
+            diseases: {}
+        };
+    }
+
+    // 统计每个区域的数据
+    Object.values(data).forEach(result => {
+        const zoneId = parseInt(result.zone_id);
+        if (zoneId >= 1 && zoneId <= stats.totalZones) {
+            const zoneStat = stats.zoneStats[zoneId];
+            zoneStat.totalDetections++;
+            stats.totalDetections++;
+
+            // 检查是否有异常检测结果
+            const hasAbnormalDetection = result.detections.some(detection => 
+                detection.class_name !== '健康花朵' && 
+                detection.class_name !== '健康果实' && 
+                detection.class_name !== '健康叶片'
+            );
+
+            if (hasAbnormalDetection) {
+                zoneStat.abnormalPlants.add(result.plant_id);
+            }
+
+            // 统计病害类别
+            result.detections.forEach(detection => {
+                const diseaseClass = detection.class_name;
+                if (!zoneStat.diseases[diseaseClass]) {
+                    zoneStat.diseases[diseaseClass] = 0;
+                }
+                zoneStat.diseases[diseaseClass]++;
+
+                // 更新总病害统计
+                if (!stats.diseaseStats[diseaseClass]) {
+                    stats.diseaseStats[diseaseClass] = 0;
+                }
+                stats.diseaseStats[diseaseClass]++;
+            });
+        }
+    });
+
+    // 计算正常和异常分区数量
+    Object.values(stats.zoneStats).forEach(zoneStat => {
+        if (zoneStat.abnormalPlants.size > 0) {
+            stats.abnormalZones++;
+        } else {
+            stats.normalZones++;
+        }
+    });
+
+    // 更新总体统计信息
+    document.getElementById('totalZones').textContent = stats.totalZones;
+    document.getElementById('normalZones').textContent = stats.normalZones;
+    document.getElementById('abnormalZones').textContent = stats.abnormalZones;
+    document.getElementById('totalDetections').textContent = stats.totalDetections;
+
+    // 更新分区状态表格
+    const zoneStatusTable = document.getElementById('zoneStatusTable');
+    zoneStatusTable.innerHTML = '';
+    Object.entries(stats.zoneStats).forEach(([zoneId, zoneStat]) => {
+        const row = document.createElement('tr');
+        const status = zoneStat.abnormalPlants.size > 0 ? '异常' : 
+                      zoneStat.totalDetections > 0 ? '正常' : '优良';
+        row.innerHTML = `
+            <td>${zoneId}</td>
+            <td>
+                <span class="badge ${status === '优良' ? 'bg-success' : 
+                                 status === '正常' ? 'bg-primary' : 'bg-danger'}">
+                    ${status}
+                </span>
+            </td>
+            <td>${zoneStat.totalDetections}</td>
+            <td>${zoneStat.abnormalPlants.size}</td>
+        `;
+        zoneStatusTable.appendChild(row);
+    });
+
+    // 计算总病害次数
+    const totalDiseaseCount = Object.values(stats.diseaseStats).reduce((sum, count) => sum + count, 0);
+
+    // 更新病害统计表格
+    const diseaseStatsTable = document.getElementById('diseaseStatsTable');
+    diseaseStatsTable.innerHTML = '';
+    Object.entries(stats.diseaseStats).forEach(([diseaseClass, count]) => {
+        const row = document.createElement('tr');
+        const percentage = totalDiseaseCount > 0 ? ((count / totalDiseaseCount) * 100).toFixed(1) : 0;
+        row.innerHTML = `
+            <td>${diseaseClass}</td>
+            <td>${count}</td>
+            <td>${percentage}%</td>
+        `;
+        diseaseStatsTable.appendChild(row);
+    });
+}
+
+// 页面加载完成后执行
+document.addEventListener('DOMContentLoaded', function() {
+    loadDetections();
+    // 每10秒更新一次数据
+    setInterval(loadDetections, 10000);
+});
+</script>
+
+<style>
+.stat-card {
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: var(--border-radius);
+    transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.stat-card h3 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.chart-container {
+    position: relative;
+    height: 200px;
+    margin-bottom: 1rem;
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.badge {
+    font-size: 0.9em;
+    padding: 0.5em 1em;
+}
+</style>
+{% endblock %} 

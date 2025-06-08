@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- 左侧区域列表 -->
+        <div class="col-md-3">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">区域列表</h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group">
+                        {% for i in range(1, 13) %}
+                        <a href="#" class="list-group-item list-group-item-action" 
+                           onclick="showZoneDetails('{{ i }}')">
+                            区域 {{ i }}
+                            <span class="badge bg-success float-end" id="zone-{{ i }}-status">优良</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧检测记录 -->
+        <div class="col-md-9">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">植株状态</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="plantGrid">
+                        <!-- 植株状态将通过JavaScript动态加载 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 图片详情模态框 -->
+<div class="modal fade" id="imageModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content glass-effect">
+            <div class="modal-header">
+                <h5 class="modal-title">检测详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>原始图片</h6>
+                        <img id="originalImage" class="img-fluid" src="">
+                    </div>
+                    <div class="col-md-6">
+                        <h6>标注图片</h6>
+                        <img id="annotatedImage" class="img-fluid" src="">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <h6>检测结果</h6>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>病害类别</th>
+                                    <th>置信度</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detectionDetails">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 未检测提示模态框 -->
+<div class="modal fade" id="noDetectionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content glass-effect">
+            <div class="modal-header">
+                <h5 class="modal-title">提示</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <i class="fas fa-info-circle fa-3x text-warning mb-3"></i>
+                <h5>该植株尚未进行检测</h5>
+                <p class="text-muted">请先进行检测以查看详细信息</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allDetections = {};
+let currentZone = null;
+
+// 病害类别映射
+const diseaseClasses = {
+    0: '角斑病',
+    1: '炭疽病',
+    2: '花腐病',
+    3: '灰霉病',
+    4: '健康花朵',
+    5: '健康果实',
+    6: '健康叶片',
+    7: '叶斑病',
+    8: '果实白粉病',
+    9: '叶片白粉病'
+};
+
+// 更新区域状态
+function updateZoneStatus(zoneId, detections) {
+    const statusElement = document.getElementById(`zone-${zoneId}-status`);
+    if (!statusElement) {
+        console.log(`未找到区域${zoneId}的状态元素`);
+        return;
+    }
+
+    // 检查该区域的所有检测结果
+    let hasAbnormal = false;
+    let hasDetections = false;
+
+    // 遍历所有检测结果
+    Object.values(detections).forEach(detection => {
+        if (String(detection.zone_id) === String(zoneId)) {
+            hasDetections = true;
+            detection.detections.forEach(item => {
+                if (item.class !== 4 && item.class !== 5 && item.class !== 6) {
+                    hasAbnormal = true;
+                }
+            });
+        }
+    });
+
+    // 更新状态显示
+    let status = '优良';
+    let statusClass = 'success';
+    
+    if (hasDetections) {
+        if (hasAbnormal) {
+            status = '异常';
+            statusClass = 'danger';
+        } else {
+            status = '正常';
+            statusClass = 'info';
+        }
+    }
+
+    statusElement.innerHTML = `<span class="badge bg-${statusClass}">${status}</span>`;
+    console.log(`区域${zoneId}状态已更新为: ${status}`);
+}
+
+// 加载检测结果
+function loadDetections() {
+    console.log('开始加载检测结果...');
+    fetch('/get_detections')
+        .then(response => response.json())
+        .then(data => {
+            console.log('获取到检测结果:', data);
+            allDetections = data;  // 保存检测结果
+            
+            // 更新每个区域的状态
+            for (let i = 1; i <= 12; i++) {
+                updateZoneStatus(i, data);
+            }
+            
+            // 如果当前正在查看某个区域的详情，也更新详情显示
+            if (currentZone) {
+                showZoneDetails(currentZone);
+            }
+        })
+        .catch(error => {
+            console.error('加载检测结果失败:', error);
+        });
+}
+
+// 页面加载完成后立即加载一次数据
+document.addEventListener('DOMContentLoaded', function() {
+    loadDetections();
+    // 每10秒刷新一次数据
+    setInterval(loadDetections, 10000);
+});
+
+// 显示区域详情
+function showZoneDetails(zoneId) {
+    console.log(`显示区域${zoneId}详情`);
+    currentZone = zoneId;
+    const plantGrid = document.getElementById('plantGrid');
+    plantGrid.innerHTML = '';
+
+    // 创建20个植株卡片
+    for (let i = 1; i <= 20; i++) {
+        const plantId = `${zoneId}_${i}`;
+        const plantCard = document.createElement('div');
+        plantCard.className = 'col-md-3 mb-4';
+        
+        // 查找该植株的最新检测结果
+        const plantDetections = Object.values(allDetections)
+            .filter(result => String(result.zone_id) === String(zoneId) && result.plant_id === i.toString())
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        let status = 'success';
+        let statusText = '优良';
+        let hasDetection = false;
+
+        if (plantDetections.length > 0) {
+            hasDetection = true;
+            const latestDetection = plantDetections[0];
+            const hasAbnormal = latestDetection.detections.some(d => 
+                d.class !== 4 && d.class !== 5 && d.class !== 6
+            );
+            
+            if (hasAbnormal) {
+                status = 'danger';
+                statusText = '异常';
+            } else {
+                status = 'success';
+                statusText = '正常';
+            }
+        }
+
+        plantCard.innerHTML = `
+            <div class="card glass-effect h-100">
+                <div class="card-body text-center">
+                    <h5 class="card-title">植株 ${i}</h5>
+                    <p class="card-text">
+                        <span class="badge bg-${status}">${statusText}</span>
+                    </p>
+                    ${hasDetection ? `
+                        <button class="btn btn-primary btn-sm" 
+                                onclick="showPlantDetails('${plantDetections[0].result_id}')">
+                            查看详情
+                        </button>
+                    ` : `
+                        <button class="btn btn-secondary btn-sm" 
+                                onclick="showNoDetection()">
+                            未检测
+                        </button>
+                    `}
+                </div>
+            </div>
+        `;
+        plantGrid.appendChild(plantCard);
+    }
+}
+
+// 显示植株详情
+function showPlantDetails(resultId) {
+    const result = allDetections[resultId];
+    if (result) {
+        document.getElementById('originalImage').src = result.original_image;
+        document.getElementById('annotatedImage').src = result.annotated_image;
+        
+        const detailsBody = document.getElementById('detectionDetails');
+        detailsBody.innerHTML = '';
+        
+        result.detections.forEach(detection => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${diseaseClasses[detection.class]}</td>
+                <td>${(detection.confidence * 100).toFixed(2)}%</td>
+            `;
+            detailsBody.appendChild(row);
+        });
+        
+        new bootstrap.Modal(document.getElementById('imageModal')).show();
+    }
+}
+
+// 显示未检测提示
+function showNoDetection() {
+    new bootstrap.Modal(document.getElementById('noDetectionModal')).show();
+}
+</script>
+
+<style>
+.plant-card {
+    transition: transform 0.3s ease;
+}
+
+.plant-card:hover {
+    transform: translateY(-5px);
+}
+
+.badge {
+    font-size: 0.9em;
+    padding: 0.5em 1em;
+}
+
+.card {
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+</style>
+{% endblock %} 

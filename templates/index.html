@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- 左侧上传区域 -->
+        <div class="col-md-6">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">图片上传</h5>
+                </div>
+                <div class="card-body">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-content">
+                            <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                            <h4>拖拽图片到此处或点击上传</h4>
+                            <p class="text-muted">支持 JPG、PNG 格式</p>
+                            <input type="file" id="fileInput" class="d-none" accept="image/*">
+                            <button class="btn btn-primary btn-lg" onclick="document.getElementById('fileInput').click()">
+                                选择图片
+                            </button>
+                        </div>
+                    </div>
+                    <div id="previewArea" class="mt-3 d-none">
+                        <img id="previewImage" class="img-fluid rounded" src="">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 检测参数设置 -->
+            <div class="card glass-effect mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">检测参数</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">区域编号</label>
+                            <select class="form-select" id="zoneId">
+                                {% for i in range(1, 13) %}
+                                <option value="{{ i }}">区域 {{ i }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">植株编号</label>
+                            <select class="form-select" id="plantId">
+                                {% for i in range(1, 21) %}
+                                <option value="{{ i }}">植株 {{ i }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">置信度阈值</label>
+                            <input type="range" class="form-range" id="confThreshold" 
+                                   min="0" max="100" value="25" 
+                                   oninput="updateConfValue(this.value)">
+                            <div class="d-flex justify-content-between">
+                                <small>0%</small>
+                                <small id="confValue">25%</small>
+                                <small>100%</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">IOU阈值</label>
+                            <input type="range" class="form-range" id="iouThreshold" 
+                                   min="0" max="100" value="70" 
+                                   oninput="updateIouValue(this.value)">
+                            <div class="d-flex justify-content-between">
+                                <small>0%</small>
+                                <small id="iouValue">70%</small>
+                                <small>100%</small>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-lg w-100" onclick="startDetection()">
+                        开始检测
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧结果显示 -->
+        <div class="col-md-6">
+            <div class="card glass-effect">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">检测结果</h5>
+                </div>
+                <div class="card-body">
+                    <div id="resultArea" class="d-none">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>原始图片</h6>
+                                <img id="originalImage" class="img-fluid rounded" src="">
+                            </div>
+                            <div class="col-md-6">
+                                <h6>标注图片</h6>
+                                <img id="annotatedImage" class="img-fluid rounded" src="">
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <h6>检测详情</h6>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>病害类别</th>
+                                            <th>置信度</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="detectionTable">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="noResult" class="text-center py-5">
+                        <i class="fas fa-microscope fa-3x mb-3"></i>
+                        <h4>等待检测</h4>
+                        <p class="text-muted">上传图片并设置参数后开始检测</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 更新置信度显示
+function updateConfValue(value) {
+    document.getElementById('confValue').textContent = value + '%';
+}
+
+// 更新IOU显示
+function updateIouValue(value) {
+    document.getElementById('iouValue').textContent = value + '%';
+}
+
+// 处理文件选择
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('previewImage').src = e.target.result;
+            document.getElementById('previewArea').classList.remove('d-none');
+        };
+        reader.readAsDataURL(file);
+    }
+});
+
+// 处理拖放
+const uploadArea = document.getElementById('uploadArea');
+
+uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+});
+
+uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('dragover');
+});
+
+uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    
+    const file = e.dataTransfer.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('previewImage').src = e.target.result;
+            document.getElementById('previewArea').classList.remove('d-none');
+        };
+        reader.readAsDataURL(file);
+    }
+});
+
+// 开始检测
+function startDetection() {
+    const fileInput = document.getElementById('fileInput');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('请先选择图片');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('conf', document.getElementById('confThreshold').value / 100);
+    formData.append('iou', document.getElementById('iouThreshold').value / 100);
+    formData.append('zone_id', document.getElementById('zoneId').value);
+    formData.append('plant_id', document.getElementById('plantId').value);
+    
+    // 显示加载状态
+    document.getElementById('noResult').innerHTML = `
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h4 class="mt-3">正在检测中...</h4>
+    `;
+    
+    fetch('/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        showDetectionResults(data);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('检测失败，请重试');
+    });
+}
+
+function showDetectionResults(data) {
+    if (data.success) {
+        // 显示检测结果
+        document.getElementById('originalImage').src = data.original_image;
+        document.getElementById('annotatedImage').src = data.annotated_image;
+        
+        // 更新检测结果表格
+        const tbody = document.getElementById('detectionTable');
+        tbody.innerHTML = '';
+        data.detections.forEach(detection => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${detection.class}</td>
+                <td>${(detection.confidence * 100).toFixed(1)}%</td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        // 显示结果区域
+        document.getElementById('resultArea').classList.remove('d-none');
+        document.getElementById('noResult').classList.add('d-none');
+
+        // 检测完成后，如果当前在监控页面，则刷新监控数据
+        if (window.location.pathname === '/monitor') {
+            loadDetections();
+        }
+    } else {
+        alert('检测失败: ' + data.error);
+    }
+}
+</script>
+{% endblock %} 
